@@ -1,0 +1,297 @@
+﻿@page "/"
+@using System.Threading
+
+@{
+    var values = new string[] { "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K" };
+    var suits = new string[] { "C", "D", "H", "S" };
+
+    foreach (string suit in suits)
+    {
+        foreach (string value in values)
+        {
+            <link rel='preload' href='images/cards/@(string.Format("{0}{1}", value, suit)).png' as='image'>
+        }
+    }
+}
+
+<h1>WAR!</h1>
+
+<p>The goal is to be the first player to win all 52 cards</p>
+
+<h3>The Deal</h3>
+<p>The deck is divided evenly, with each player receiving 26 cards, dealt one at a time, face down. Anyone may deal first. Each player places their stack of cards face down, in front of them.</p>
+
+<h3>The Play</h3>
+<p>Each player turns up a card at the same time and the player with the higher card takes both cards and puts them, face down, on the bottom of his stack. </p>
+
+<p>If the cards are the same rank, it is War. Each player turns over two cards face down then chooses (clicks) one to turn face up. The player with the higher cards takes both piles (six cards). If the turned-up cards are again the same rank, each player places another card face down and turns another card face up. The player with the higher card takes all 10 cards, and so on. </p>
+
+<h3>The End</h3>
+<p>The game ends when one player has won all the cards.</p>
+
+
+<div>Computer Deck (@Computer.Deck.Cards.Count):</div>
+
+<div class="in-play-area d-inline-block">
+    <img class="playing-card" src='/images/cards/@(Computer.Deck.Cards.Any() ? Computer.Deck.Cards.Last().BackImage : "blank.png")' title="The computer's deck" alt="back of card" />
+</div>
+
+<div class="in-play-area d-inline-block">
+    @if (Computer.InPlay.Cards.Any())
+    {
+        <span class="mr-2">Battle Zone!</span>
+        foreach (Card card in Computer.InPlay.Cards)
+        {
+            <img class="playing-card" src='/images/cards/@(card.IsFaceUp ? card.FrontImage : card.BackImage)' title='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")' alt='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")' />
+        }
+    }
+</div>
+
+<div class="in-play-area d-inline-block">
+    @if (Computer.WarZone.Cards.Any())
+    {
+        <span class="mr-2">War Zone!</span>
+        foreach (Card card in Computer.WarZone.Cards)
+        {
+            <img class="playing-card" src='/images/cards/@(card.IsFaceUp ? card.FrontImage : card.BackImage)' title='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "The computer will choose their card when you do")' alt='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")' />
+        }
+    }
+</div>
+
+<br />
+
+<div>Player Deck (@Player.Deck.Cards.Count):</div>
+
+<div class="in-play-area d-inline-block">
+    <img class="playing-card" src='/images/cards/@(Player.Deck.Cards.Any() ? Player.Deck.Cards.Last().BackImage : "blank.png")' title="Your deck" alt="back of card" />
+</div>
+
+<div class="in-play-area d-inline-block">
+    @if (Player.InPlay.Cards.Any())
+    {
+        <span class="mr-2">Battle Zone!</span>
+        foreach (Card card in Player.InPlay.Cards)
+        {
+            <img class="playing-card" src='/images/cards/@(card.IsFaceUp ? card.FrontImage : card.BackImage)' title='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")' alt='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")' />
+        }
+    }
+</div>
+
+<div class="in-play-area d-inline-block">
+    @if (Player.WarZone.Cards.Any())
+    {
+        <span class="mr-2">War Zone!</span>
+        foreach (Card card in Player.WarZone.Cards)
+        {
+            <img class="playing-card" @onclick="async () => { if (!warRoundAnimationInProgress) { await PlayWarRound(card); }; }" src='/images/cards/@(card.IsFaceUp ? card.FrontImage : card.BackImage)' title='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "Click to turn face up")' alt='@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")' />
+        }
+    }
+</div>
+
+<br />
+<button type="button" @onclick="async () => await DrawCards()" disabled="@(endOfRound || warRound)">Draw Cards!</button>
+<button type="button" @onclick="() => EndRound()" disabled="@(!endOfRound || warRound)">End Round</button>
+
+<div id="round-result-text" class="text-center font-weight-bold">
+    @roundResultText
+</div>
+
+
+
+@code {
+
+    private Deck deck { get; set; }
+    private WarGameParticipant Player { get; set; }
+    private WarGameParticipant Computer { get; set; }
+    private string roundResultText { get; set; }
+    private bool endOfRound { get; set; } = false;
+    private bool warRound { get; set; } = false;
+    private bool warRoundAnimationInProgress { get; set; } = false;
+    private WarGameParticipant roundWinner { get; set; }
+    private bool endOfRoundButtonPressed { get; set; } = false;
+    CancellationTokenSource source;
+    CancellationToken cancellationToken;
+
+
+
+    protected override void OnInitialized()
+    {
+        NewGame();
+    }
+
+    private void NewGame()
+    {
+        deck = new Deck(true);
+        Player = new WarGameParticipant();
+        Computer = new WarGameParticipant();
+
+        for (var i = deck.Cards.Count - 1; i >= 0; i -= 2)
+        {
+            var dealtCard = deck.Deal(false);
+            Player.Deck.Cards.Add(dealtCard);
+            dealtCard = deck.Deal(false);
+            Computer.Deck.Cards.Add(dealtCard);
+        }
+    }
+
+    private async Task DrawCards()
+    {
+        try
+        {
+            var computerDrawnCard = Computer.Deck.Deal(true);
+            Computer.InPlay.Cards.Add(computerDrawnCard);
+            var playerDrawnCard = Player.Deck.Deal(true);
+            Player.InPlay.Cards.Add(playerDrawnCard);
+
+
+            await CompareCards(computerDrawnCard, playerDrawnCard);
+        }
+        catch (Exception)
+        {
+            CalculateWinner();
+        }
+    }
+
+    private async Task CompareCards(Card computerDrawnCard, Card playerDrawnCard)
+    {
+        if ((playerDrawnCard.Value + 11) % 13 > (computerDrawnCard.Value + 11) % 13)
+        {
+            roundResultText = "Congratulations! You won the round.";
+            StateHasChanged();
+            roundWinner = Player;
+            await AutoFinishRound();
+        }
+        else if ((playerDrawnCard.Value + 11) % 13 < (computerDrawnCard.Value + 11) % 13)
+        {
+            roundResultText = "Unlucky! You lost the round.";
+            StateHasChanged();
+            roundWinner = Computer;
+            await AutoFinishRound();
+        }
+        else
+        {
+            roundResultText = "THIS... IS... WAR!";
+            StateHasChanged();
+            DealWarRound();
+        }
+    }
+
+
+    private async Task AutoFinishRound()
+    {
+        endOfRound = true;
+        StateHasChanged();
+
+        endOfRoundButtonPressed = false;
+
+
+        source = new CancellationTokenSource();
+        cancellationToken = source.Token;
+
+
+        await Task.Delay(2000, cancellationToken);
+        if (!endOfRoundButtonPressed)
+        {
+            EndRound();
+        }
+    }
+
+    private void EndRound()
+    {
+        endOfRoundButtonPressed = true;
+        source.Cancel();
+        warRoundAnimationInProgress = false;
+
+        roundResultText = "";
+
+        foreach (Card card in Computer.InPlay.Cards)
+        {
+            roundWinner.Deck.Cards.Insert(0, card);
+        }
+
+        foreach (Card card in Computer.WarZone.Cards)
+        {
+            roundWinner.Deck.Cards.Insert(0, card);
+        }
+
+        foreach (Card card in Player.InPlay.Cards)
+        {
+            roundWinner.Deck.Cards.Insert(0, card);
+        }
+        foreach (Card card in Player.WarZone.Cards)
+        {
+            roundWinner.Deck.Cards.Insert(0, card);
+        }
+
+        Computer.InPlay = new Hand();
+        Player.InPlay = new Hand();
+        Computer.WarZone = new Hand();
+        Player.WarZone = new Hand();
+        endOfRound = false;
+    }
+
+    private void DealWarRound()
+    {
+        try
+        {
+            warRound = true;
+            warRoundAnimationInProgress = false;
+            if (Computer.WarZone.Cards.Any())
+            {
+                foreach (Card card in Computer.WarZone.Cards)
+                {
+                    Computer.InPlay.Cards.Add(card);
+                }
+                Computer.WarZone = new Hand();
+
+                foreach (Card card in Player.WarZone.Cards)
+                {
+                    Player.InPlay.Cards.Add(card);
+                }
+                Player.WarZone = new Hand();
+            }
+            for (int i = 0; i < 2; i++)
+            {
+                Computer.WarZone.Cards.Add(Computer.Deck.Deal(false));
+                Player.WarZone.Cards.Add(Player.Deck.Deal(false));
+            }
+        }
+        catch (Exception)
+        {
+            CalculateWinner();
+        }
+    }
+
+    private async Task PlayWarRound(Card playerChoice)
+    {
+        warRoundAnimationInProgress = true;
+        playerChoice.IsFaceUp = true;
+
+        var randNum = new Random().Next(1, 2);
+
+        Computer.WarZone.Cards[randNum].IsFaceUp = true;
+
+        await Task.Delay(1000);
+
+        warRound = false;
+
+        await CompareCards(Computer.WarZone.Cards[randNum], playerChoice);
+    }
+
+    private void CalculateWinner()
+    {
+        if (Computer.Deck.Cards.Count > Player.Deck.Cards.Count)
+        {
+            roundResultText = "Too bad, you've lost this time!";
+        }
+        else if (Computer.Deck.Cards.Count < Player.Deck.Cards.Count)
+        {
+            roundResultText = "Congratulations, you've won!";
+        }
+        else
+        {
+            roundResultText = "This is a draw!";
+        }
+    }
+
+}

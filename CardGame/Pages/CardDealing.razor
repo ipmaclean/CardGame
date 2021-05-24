@@ -1,0 +1,43 @@
+﻿@page "/dealing"
+
+Deck:
+<img class="playing-card" src='/images/cards/@(deck.Cards.Any() ? deck.Cards.Last().BackImage : "blank.png")' alt="back of card"/>
+
+Cards remaining: @deck.Cards.Count
+
+<br />
+
+<button type="button" @onclick="() => DealCard(true)" disabled="@(!deck.Cards.Any())">Deal!</button>
+<button type="button" @onclick="() => DealCard(false)" disabled="@(!deck.Cards.Any())">Deal face down!</button>
+
+<br />
+
+Hand:
+<ul class="hand">
+    @foreach (Card card in hand.Cards)
+    {
+    <li>
+        <img class="playing-card" src='/images/cards/@(card.IsFaceUp ? card.FrontImage : card.BackImage)' title='@string.Format("{0} of {1}", card.Name, card.Suit)' alt="@(card.IsFaceUp ? string.Format("{0} of {1}", card.Name, card.Suit) : "back of card")" />
+    </li>
+    }
+</ul>
+
+
+@code {
+
+    private Deck deck { get; set; }
+    private Hand hand { get; set; } = new Hand();
+
+    protected override void OnInitialized()
+    {
+        deck = new Deck(true);
+    }
+
+    private void DealCard(bool faceUp)
+    {
+        var dealtCard = deck.Deal(faceUp);
+
+        hand.Cards.Add(dealtCard);
+
+    }
+}
